@@ -8,7 +8,7 @@ from omniLoader import OmniglotLoader as og
 class SiameseNet():
     
     eps = 1e-10
-    learn_rate = 1e-6
+    learn_rate = 1e-4
 
     x_1 = tf.placeholder(tf.float32, shape=[None, og.im_size, og.im_size, og.im_channel])
     x_2 = tf.placeholder(tf.float32, shape=[None, og.im_size, og.im_size, og.im_channel])
@@ -65,12 +65,28 @@ class SiameseNet():
         grad = optim.compute_gradients(self.loss)
         self.training = optim.apply_gradients(grad)
 
-        correct = tf.to_float(tf.greater(tf.squeeze(self.logits, axis=[1]), 0.5))
-        self.accuracy = tf.reduce_sum(correct)/tf.to_float(tf.shape(self.y)[0])
+        self.n_trues = tf.count_nonzero(self.y, dtype=tf.float32)
+        self.positives = tf.greater(tf.squeeze(tf.sigmoid(self.logits), axis=[1]), 0.5)
+        self.n_pos = tf.count_nonzero(self.positives, dtype=tf.float32)
+        self.tp = tf.logical_and(self.positives, tf.equal(self.y, 1.0))
+        self.n_tp = tf.count_nonzero(self.tp, dtype=tf.float32)
+        self.n_falses = tf.count_nonzero(tf.equal(self.y, 0.0), dtype=tf.float32)
+        self.fp = tf.logical_and(self.positives, tf.equal(self.y, 0.0))
+        self.n_fp = tf.count_nonzero(self.fp, dtype=tf.float32)
+
+        def outputzero() : return 0.0
+        def comp_pr(): return tf.div(self.n_tp, self.n_pos)
+        def comp_rcll(): return tf.div(self.n_tp, self.n_trues)
+        def comp_fpr(): return tf.div(self.n_fp, self.n_falses)
+
+        self.precision = tf.cond(tf.greater(self.n_pos, 0.0), true_fn=comp_pr, false_fn=outputzero)
+        self.recall = tf.cond(tf.greater(self.n_trues, 0.0), true_fn=comp_rcll, false_fn=outputzero)
+        self.fpr = tf.cond(tf.greater(self.n_falses, 0.0), true_fn=comp_fpr, false_fn=outputzero)
+        # self.accuracy = tf.reduce_sum(self.correct)/tf.to_float(tf.shape(self.y)[0])
 
 if __name__ == '__main__':
     os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
-    os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+    os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 
     loader = og(0)
     model = SiameseNet(sharing=True)
@@ -81,13 +97,37 @@ if __name__ == '__main__':
     step = 0
     while True:
         x1, x2, y = loader.getTrainSample()
-        [_, h1, h2, logits, loss, accuracy] = session.run([model.training, model.h1, model.h2, model.logits, model.loss, model.accuracy],
+        [_, h1, h2, logits, loss, precision, recall, fpr] = session.run([model.training, model.h1, model.h2, model.logits, model.loss, model.precision, model.recall, model.fpr],
             feed_dict={model.x_1:x1, model.x_2:x2, model.y:y})
 
         step += 1
         if (step %50) == 0:
-            print('{}\n  train: loss={}, acc={:.2%}'.format(step, loss, accuracy))
+            print('{}\n  train: loss={:.5f}, lr={}, pr={:.2%}, rcll={:.2%}, fpr={:.2%}'.format(step, loss, model.learn_rate, precision, recall, fpr))
             x1_t, x2_t, y_t = loader.getTestSample(batch_sz=128)
-            [acc_t] = session.run([model.accuracy], feed_dict={model.x_1:x1_t, model.x_2:x2_t, model.y:y_t})
-            print('  test: acc={:.2%}'.format(acc_t))
-    
+            [pr_t, rcll_t, fpr_t] = session.run([model.precision, model.recall, model.fpr], feed_dict={model.x_1:x1_t, model.x_2:x2_t, model.y:y_t})
+            print('    test: pr={:.2%}, rcll={:.2%}, fpr={:.2%}'.format(pr_t, rcll_t, fpr_t))
+
+        # if not (np.sum(np.float32(np.float32(np.squeeze(1/(1+np.exp(-logits)))>0.5) == correct)) == y.shape[0]):
+        #     print('error 1')
+        if (step % 500) == 0 and model.learn_rate > 1e-6:
+            model.learn_rate *= 0.98
+
+        # sanity check code
+        if (step % 1000) == 0:
+            ck_n_trues = np.sum(np.float32(y == 1))
+            ck_n_false = np.sum(np.float32(y == 0))
+            ck_pred = np.squeeze(1/(1+np.exp(-logits)))
+            ck_pos = ck_pred > 0.5
+            ck_n_pos = np.sum(np.float32(ck_pos))
+            ck_tp = np.logical_and(ck_pos, (y==1))
+            ck_fp = np.logical_and(ck_pos, (y==0))
+            ck_prc = np.sum(ck_tp)/ck_n_pos if ck_n_pos>0.0 else 0.0
+            ck_rcll = np.sum(ck_tp)/ck_n_trues if ck_n_trues>0.0 else 0.0
+            ck_fpr = np.sum(ck_fp)/ck_n_false if ck_n_false>0.0 else 0.0
+
+            if np.abs(ck_prc-precision) > 1e-5:
+                print('error precision')
+            if np.abs(ck_rcll-recall) > 1e-5:
+                print('error recall')
+            if np.abs(ck_fpr-fpr) > 1e-5:
+                print('error fpr')
