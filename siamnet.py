@@ -58,31 +58,38 @@ class SiameseNet():
             self.alpha = tf.get_variable('alpha', [1, 4096],
                 initializer=tf.random_normal_initializer(mean=0.0, stddev=0.2))
         
-        self.logits = tf.reduce_sum(tf.multiply(l1dist, self.alpha), 1, keepdims=True)
-        ys = tf.expand_dims(self.y, 1)
-        self.loss = tf.reduce_sum(tf.nn.sigmoid_cross_entropy_with_logits(labels=ys, logits=self.logits))
-        optim = tf.train.AdamOptimizer(learning_rate=self.learn_rate)
-        grad = optim.compute_gradients(self.loss)
-        self.training = optim.apply_gradients(grad)
+        with tf.variable_scope('loss_and_training'):
+            self.logits = tf.reduce_sum(tf.multiply(l1dist, self.alpha), 1, keepdims=True)
+            ys = tf.expand_dims(self.y, 1)
+            self.loss = tf.reduce_sum(tf.nn.sigmoid_cross_entropy_with_logits(labels=ys, logits=self.logits))
+            optim = tf.train.AdamOptimizer(learning_rate=self.learn_rate)
+            grad = optim.compute_gradients(self.loss)
+            self.training = optim.apply_gradients(grad)
 
-        self.n_trues = tf.count_nonzero(self.y, dtype=tf.float32)
-        self.positives = tf.greater(tf.squeeze(tf.sigmoid(self.logits), axis=[1]), 0.5)
-        self.n_pos = tf.count_nonzero(self.positives, dtype=tf.float32)
-        self.tp = tf.logical_and(self.positives, tf.equal(self.y, 1.0))
-        self.n_tp = tf.count_nonzero(self.tp, dtype=tf.float32)
-        self.n_falses = tf.count_nonzero(tf.equal(self.y, 0.0), dtype=tf.float32)
-        self.fp = tf.logical_and(self.positives, tf.equal(self.y, 0.0))
-        self.n_fp = tf.count_nonzero(self.fp, dtype=tf.float32)
+        with tf.variable_scope('accuracy'):
+            self.n_trues = tf.count_nonzero(self.y, dtype=tf.float32)
+            self.positives = tf.greater(tf.squeeze(tf.sigmoid(self.logits), axis=[1]), 0.5)
+            self.n_pos = tf.count_nonzero(self.positives, dtype=tf.float32)
+            self.tp = tf.logical_and(self.positives, tf.equal(self.y, 1.0))
+            self.n_tp = tf.count_nonzero(self.tp, dtype=tf.float32)
+            self.n_falses = tf.count_nonzero(tf.equal(self.y, 0.0), dtype=tf.float32)
+            self.fp = tf.logical_and(self.positives, tf.equal(self.y, 0.0))
+            self.n_fp = tf.count_nonzero(self.fp, dtype=tf.float32)
 
-        def outputzero() : return 0.0
-        def comp_pr(): return tf.div(self.n_tp, self.n_pos)
-        def comp_rcll(): return tf.div(self.n_tp, self.n_trues)
-        def comp_fpr(): return tf.div(self.n_fp, self.n_falses)
+            def outputzero() : return 0.0
+            def comp_pr(): return tf.div(self.n_tp, self.n_pos)
+            def comp_rcll(): return tf.div(self.n_tp, self.n_trues)
+            def comp_fpr(): return tf.div(self.n_fp, self.n_falses)
 
-        self.precision = tf.cond(tf.greater(self.n_pos, 0.0), true_fn=comp_pr, false_fn=outputzero)
-        self.recall = tf.cond(tf.greater(self.n_trues, 0.0), true_fn=comp_rcll, false_fn=outputzero)
-        self.fpr = tf.cond(tf.greater(self.n_falses, 0.0), true_fn=comp_fpr, false_fn=outputzero)
-        # self.accuracy = tf.reduce_sum(self.correct)/tf.to_float(tf.shape(self.y)[0])
+            self.precision = tf.cond(tf.greater(self.n_pos, 0.0), true_fn=comp_pr, false_fn=outputzero)
+            self.recall = tf.cond(tf.greater(self.n_trues, 0.0), true_fn=comp_rcll, false_fn=outputzero)
+            self.fpr = tf.cond(tf.greater(self.n_falses, 0.0), true_fn=comp_fpr, false_fn=outputzero)
+            
+        with tf.variable_scope('20_way_oneshot_classification'):
+            self.pred = tf.squeeze(tf.sigmoid(self.logits), axis=[1])
+            self.pred = tf.expand_dims(self.pred, 0)
+            self.loc = tf.squeeze(tf.where(tf.equal(self.y, 1.0)), axis=[1])
+            self.correct = tf.squeeze(tf.nn.in_top_k(self.pred, self.loc, k=1))
 
 if __name__ == '__main__':
     os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
@@ -105,7 +112,17 @@ if __name__ == '__main__':
             print('{}\n  train: loss={:.5f}, lr={}, pr={:.2%}, rcll={:.2%}, fpr={:.2%}'.format(step, loss, model.learn_rate, precision, recall, fpr))
             x1_t, x2_t, y_t = loader.getTestSample(batch_sz=128)
             [pr_t, rcll_t, fpr_t] = session.run([model.precision, model.recall, model.fpr], feed_dict={model.x_1:x1_t, model.x_2:x2_t, model.y:y_t})
-            print('    test: pr={:.2%}, rcll={:.2%}, fpr={:.2%}'.format(pr_t, rcll_t, fpr_t))
+            print(' test: pr={:.2%}, rcll={:.2%}, fpr={:.2%}'.format(pr_t, rcll_t, fpr_t))
+
+            acc_oneshot = []
+            n_try = 150
+            for i in range(n_try):
+                x1_20, x2_20, y_20 = loader.getTestSample_20way()
+                [pred_20, loc_20, corr_20] = session.run([model.pred, model.loc, model.correct],
+                    feed_dict={model.x_1: x1_20, model.x_2: x2_20, model.y: y_20})
+                acc_oneshot.append(corr_20)
+            acc_20 = float(sum(acc_oneshot))/float(n_try)
+            print(' 20-way: acc={:.2%}'.format(acc_20))
 
         # if not (np.sum(np.float32(np.float32(np.squeeze(1/(1+np.exp(-logits)))>0.5) == correct)) == y.shape[0]):
         #     print('error 1')

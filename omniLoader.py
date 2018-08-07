@@ -114,6 +114,36 @@ class OmniglotLoader():
         if disp: self.displayImage(x_i_1, x_i_2, y_i)
         return x_i_1, x_i_2, y_i
 
+    def getTestSample_20way(self, disp=False):
+        batch_size = 20
+        x_i_1 = np.zeros([batch_size, self.im_size, self.im_size, self.im_channel], dtype=np.float32)
+        x_i_2 = np.zeros([batch_size, self.im_size, self.im_size, self.im_channel], dtype=np.float32)
+        y_i = np.zeros([batch_size])
+        
+        classes = list(self.test_chars.keys())
+        batch_idx = np.random.permutation(batch_size)
+
+        selected = np.random.choice(classes, batch_size, replace=False)
+        query_cls = selected[0]
+        drawers = np.random.choice(self.n_examples_per_char, 2, replace=False) + 1
+        q_name = self.test_chars[query_cls] + '/{:04d}_{:02d}.png'.format(query_cls, drawers[0])
+        img = cv2.imread(q_name, -1)
+        img = img.astype(np.float)/127.5 -1
+        x_i_1[:,:,:,0] = np.tile(img, (batch_size, 1, 1))
+        c_name = self.test_chars[query_cls] + '/{:04d}_{:02d}.png'.format(query_cls, drawers[1])
+        img = cv2.imread(c_name, -1)
+        x_i_2[batch_idx[0], :, :, 0] = img.astype(np.float)/127.5 -1
+        y_i[batch_idx[0]] = 1
+        for b in range(batch_size):
+            if b == 0: continue
+            c_cls = selected[b]
+            draw = np.random.randint(self.n_examples_per_char) +1
+            c_name = self.test_chars[c_cls] + '/{:04d}_{:02d}.png'.format(c_cls, draw)
+            img = cv2.imread(c_name, -1)
+            x_i_2[batch_idx[b], :, :, 0] = img.astype(np.float)/127.5 -1
+        if disp: self.displayImage(x_i_1,x_i_2, y_i)
+        return x_i_1, x_i_2, y_i
+
     def displayImage(self, x_i, x_h, y_i):
         sz = x_i.shape[0]
         for s in range(sz):
@@ -129,8 +159,9 @@ if __name__ == '__main__':
     loader = OmniglotLoader(0)
     step = 0
     while True:
-        x_1, x_2, y_hat = loader.getTrainSample(False)
+        #x_1, x_2, y_hat = loader.getTrainSample(False)
         # x_1, x_2, y_hat = loader.getTestSample(disp=True)
+        x_1, x_2, y_hat = loader.getTestSample_20way(disp=True)
         print(step)
         step += 1
         
