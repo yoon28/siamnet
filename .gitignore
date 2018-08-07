@@ -1,0 +1,6 @@
+omniglot/
+.vscode/
+__pycache__
+*.pyc
+*.txt
+omniglot
