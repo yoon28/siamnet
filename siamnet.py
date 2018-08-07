@@ -93,7 +93,7 @@ class SiameseNet():
 
 if __name__ == '__main__':
     os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
-    os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+    os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
     loader = og(0)
     model = SiameseNet(sharing=True)
@@ -109,7 +109,7 @@ if __name__ == '__main__':
 
         step += 1
         if (step %50) == 0:
-            print('{}\n  train: loss={:.5f}, lr={}, pr={:.2%}, rcll={:.2%}, fpr={:.2%}'.format(step, loss, model.learn_rate, precision, recall, fpr))
+            print('{}\n train: loss={:.5f}, lr={}, pr={:.2%}, rcll={:.2%}, fpr={:.2%}'.format(step, loss, model.learn_rate, precision, recall, fpr))
             x1_t, x2_t, y_t = loader.getTestSample(batch_sz=128)
             [pr_t, rcll_t, fpr_t] = session.run([model.precision, model.recall, model.fpr], feed_dict={model.x_1:x1_t, model.x_2:x2_t, model.y:y_t})
             print(' test: pr={:.2%}, rcll={:.2%}, fpr={:.2%}'.format(pr_t, rcll_t, fpr_t))
