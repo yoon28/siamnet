@@ -1,4 +1,6 @@
 omniglot/
+model/
+logs/
 .vscode/
 __pycache__
 *.pyc

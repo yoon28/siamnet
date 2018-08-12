@@ -90,6 +90,8 @@ class SiameseNet():
             self.pred = tf.expand_dims(self.pred, 0)
             self.loc = tf.squeeze(tf.where(tf.equal(self.y, 1.0)), axis=[1])
             self.correct = tf.squeeze(tf.nn.in_top_k(self.pred, self.loc, k=1))
+        
+        tf.summary.scalar('loss', self.loss)
 
 if __name__ == '__main__':
     os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
@@ -98,13 +100,23 @@ if __name__ == '__main__':
     loader = og(0)
     model = SiameseNet(sharing=True)
 
+    save_name = 'model/siamnet.ckpt'
+    saver = tf.train.Saver()
     session = tf.Session()
-    session.run(tf.global_variables_initializer())
+    if tf.train.checkpoint_exists(save_name):
+        print('loading')
+        saver.restore(session, save_name)
+    else:
+        print('init')
+        session.run(tf.global_variables_initializer())
     
+    merged = tf.summary.merge_all()
+    log_writer = tf.summary.FileWriter('logs', session.graph)
     step = 0
+    min_loss = float('inf')
     while True:
         x1, x2, y = loader.getTrainSample()
-        [_, h1, h2, logits, loss, precision, recall, fpr] = session.run([model.training, model.h1, model.h2, model.logits, model.loss, model.precision, model.recall, model.fpr],
+        [_, summary, h1, h2, logits, loss, precision, recall, fpr] = session.run([model.training, merged, model.h1, model.h2, model.logits, model.loss, model.precision, model.recall, model.fpr],
             feed_dict={model.x_1:x1, model.x_2:x2, model.y:y})
 
         step += 1
@@ -123,6 +135,12 @@ if __name__ == '__main__':
                 acc_oneshot.append(corr_20)
             acc_20 = float(sum(acc_oneshot))/float(n_try)
             print(' 20-way: acc={:.2%}'.format(acc_20))
+
+            log_writer.add_summary(summary, global_step=step)
+            log_writer.flush()
+            if min_loss > loss and (step % 100) == 0:
+                min_loss = loss
+                saver.save(session, save_name, global_step=step)
 
         # if not (np.sum(np.float32(np.float32(np.squeeze(1/(1+np.exp(-logits)))>0.5) == correct)) == y.shape[0]):
         #     print('error 1')
