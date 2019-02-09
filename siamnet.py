@@ -63,8 +63,8 @@ class SiameseNet():
             ys = tf.expand_dims(self.y, 1)
             self.loss = tf.reduce_sum(tf.nn.sigmoid_cross_entropy_with_logits(labels=ys, logits=self.logits))
             optim = tf.train.AdamOptimizer(learning_rate=self.learn_rate)
-            grad = optim.compute_gradients(self.loss)
-            self.training = optim.apply_gradients(grad)
+            self.grad = optim.compute_gradients(self.loss)
+            self.training = optim.apply_gradients(self.grad)
 
         with tf.variable_scope('accuracy'):
             self.n_trues = tf.count_nonzero(self.y, dtype=tf.float32)
@@ -116,7 +116,7 @@ if __name__ == '__main__':
     min_loss = float('inf')
     while True:
         x1, x2, y = loader.getTrainSample()
-        [_, summary, h1, h2, logits, loss, precision, recall, fpr] = session.run([model.training, merged, model.h1, model.h2, model.logits, model.loss, model.precision, model.recall, model.fpr],
+        [_, summary, h1, h2, logits, loss, grad, precision, recall, fpr] = session.run([model.training, merged, model.h1, model.h2, model.logits, model.loss, model.grad, model.precision, model.recall, model.fpr],
             feed_dict={model.x_1:x1, model.x_2:x2, model.y:y})
 
         step += 1
